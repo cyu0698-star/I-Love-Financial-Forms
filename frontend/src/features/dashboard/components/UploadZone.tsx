@@ -15,33 +15,31 @@ export default function UploadZone({ files, onFilesAdded, onFileRemove, onUpload
 
   const processFiles = useCallback(
     (fileList: FileList) => {
-      const newFiles: UploadedFile[] = [];
-      Array.from(fileList).forEach((file) => {
-        if (file.size > MAX_FILE_SIZE) {
-          alert(`文件 "${file.name}" 超过50MB限制`);
-          return;
-        }
-        const uf: UploadedFile = {
-          id: Math.random().toString(36).substr(2, 9),
-          file,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-        };
-        // Generate preview for images
-        if (file.type.startsWith("image/")) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            uf.preview = e.target?.result as string;
-            onFilesAdded([...newFiles]);
-          };
-          reader.readAsDataURL(file);
-        }
-        newFiles.push(uf);
-      });
-      if (newFiles.length > 0) {
-        onFilesAdded(newFiles);
+      const file = fileList[0];
+      if (!file) return;
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`文件 "${file.name}" 超过50MB限制`);
+        return;
       }
+      const uf: UploadedFile = {
+        id: Math.random().toString(36).substr(2, 9),
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      };
+
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          uf.preview = e.target?.result as string;
+          onFilesAdded([uf]);
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      onFilesAdded([uf]);
     },
     [onFilesAdded]
   );
@@ -151,7 +149,7 @@ export default function UploadZone({ files, onFilesAdded, onFileRemove, onUpload
 
             {/* Tip */}
             <p className="text-[11px] text-slate-400 mt-3">
-              温馨提示：普通用户只能上传三页文档！想要上传更多文档请开通高级会员。
+              当前流程每次仅处理 1 个文件（PDF/图片）。
             </p>
           </div>
         ) : (
@@ -159,31 +157,19 @@ export default function UploadZone({ files, onFilesAdded, onFileRemove, onUpload
           <div className="text-center">
             {/* File type icons */}
             <div className="flex items-center justify-center gap-2 mb-4">
-              {[
-                { label: "PDF", color: "bg-red-100 text-red-500" },
-                { label: "DOC", color: "bg-blue-100 text-blue-500" },
-                { label: "DOCX", color: "bg-blue-100 text-blue-500" },
-                { label: "JPG", color: "bg-orange-100 text-orange-500" },
-              ].map((t) => (
-                <span key={t.label} className={`text-[10px] font-bold px-2 py-1 rounded ${t.color}`}>
-                  {t.label}
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center justify-center gap-2 mb-4">
-              {[
-                { label: "XLS", color: "bg-emerald-100 text-emerald-600" },
-                { label: "XLSX", color: "bg-emerald-100 text-emerald-600" },
-                { label: "PNG", color: "bg-green-100 text-green-500" },
-                { label: "JPEG", color: "bg-orange-100 text-orange-500" },
-              ].map((t) => (
-                <span key={t.label} className={`text-[10px] font-bold px-2 py-1 rounded ${t.color}`}>
-                  {t.label}
-                </span>
-              ))}
-            </div>
-            
-            <p className="text-xs text-slate-400 mb-5">文件大小限制 50MB</p>
+                {[
+                  { label: "PDF", color: "bg-red-100 text-red-500" },
+                  { label: "JPG", color: "bg-orange-100 text-orange-500" },
+                  { label: "PNG", color: "bg-green-100 text-green-500" },
+                  { label: "WEBP", color: "bg-emerald-100 text-emerald-600" },
+                ].map((t) => (
+                  <span key={t.label} className={`text-[10px] font-bold px-2 py-1 rounded ${t.color}`}>
+                    {t.label}
+                  </span>
+                ))}
+              </div>
+              
+              <p className="text-xs text-slate-400 mb-5">文件大小限制 50MB</p>
 
             <label className="cursor-pointer">
               <span className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg shadow-md shadow-blue-600/20 hover:bg-blue-700 hover:shadow-lg transition-all">
@@ -196,7 +182,6 @@ export default function UploadZone({ files, onFilesAdded, onFileRemove, onUpload
               </span>
               <input
                 type="file"
-                multiple
                 accept={ACCEPTED_EXTENSIONS}
                 onChange={handleFileInput}
                 className="hidden"

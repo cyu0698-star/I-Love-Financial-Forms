@@ -62,6 +62,8 @@ Backend URL: `http://localhost:8000`
 ```env
 PYTHON_BACKEND_URL=http://localhost:8000
 KIMI_API_KEY=your_kimi_api_key
+OCR_PROVIDER=http
+OCR_HTTP_URL=http://localhost:8000/api/ocr
 ```
 
 ### Backend (`backend/.env`)

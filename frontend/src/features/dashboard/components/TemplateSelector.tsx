@@ -14,13 +14,15 @@ interface TemplateSelectorProps {
 }
 
 export default function TemplateSelector({
-  selectedType,
+  selectedType: _selectedType,
   selectedCustomTemplate,
-  onSelectType,
+  onSelectType: _onSelectType,
   onSelectCustomTemplate,
   onCreateTemplate,
   refreshKey = 0,
 }: TemplateSelectorProps) {
+  void _selectedType;
+  void _onSelectType;
   const [customTemplates, setCustomTemplates] = useState<Record<TemplateType, CustomTemplate[]>>({
     delivery_note: [],
     reconciliation: [],
@@ -61,6 +63,16 @@ export default function TemplateSelector({
     }
   };
 
+  const handleTemplateCardKeyDown = (
+    e: React.KeyboardEvent<HTMLDivElement>,
+    template: CustomTemplate
+  ) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onSelectCustomTemplate(template);
+    }
+  };
+
   const salesTemplates = TEMPLATES.filter((t) => t.category === "sales");
   const financeTemplates = TEMPLATES.filter((t) => t.category === "finance");
 
@@ -88,14 +100,17 @@ export default function TemplateSelector({
               {hasCustoms && (
                 <div className="grid grid-cols-2 gap-2">
                   {customs.map((custom) => (
-                    <button
+                    <div
                       key={custom.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => onSelectCustomTemplate(custom)}
+                      onKeyDown={(e) => handleTemplateCardKeyDown(e, custom)}
                       className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-all text-left ${
                         selectedCustomTemplate?.id === custom.id
                           ? "bg-blue-50 border-blue-300 text-blue-700 shadow-sm shadow-blue-100"
                           : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-                      }`}
+                      } cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400`}
                     >
                       {custom.previewImage ? (
                         <img
@@ -112,6 +127,7 @@ export default function TemplateSelector({
                       <span className="truncate flex-1">{custom.name}</span>
                       <button
                         onClick={(e) => handleDeleteTemplate(e, custom.id)}
+                        type="button"
                         className="absolute right-1 top-1/2 -translate-y-1/2 p-1 opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-all"
                       >
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -119,7 +135,7 @@ export default function TemplateSelector({
                           <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
                       </button>
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -159,7 +175,7 @@ export default function TemplateSelector({
       <div className="mt-4 p-3 bg-blue-50 rounded-lg">
         <p className="text-xs text-blue-600 leading-relaxed">
           <strong>使用说明：</strong>
-          <br />1. 点击"上传XX模板"创建新模板
+          <br />1. 点击&quot;上传XX模板&quot;创建新模板
           <br />2. 选择已有模板后，上传原始单据
           <br />3. AI 将自动提取数据并填充
         </p>

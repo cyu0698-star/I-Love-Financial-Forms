@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processDocument } from "@/server/ai/kimi";
 import { TemplateType } from "@/features/documents/types";
+import { validateTemplateExtractMimeType } from "@/server/layout/fileTypes.mjs";
 
 // 确保使用 Node.js 运行时，避免 edge 环境下某些网络限制
 export const runtime = "nodejs";
@@ -42,6 +43,12 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json(data);
+    }
+
+    const mimeValidation = validateTemplateExtractMimeType(mimeType);
+    if (!mimeValidation.ok) {
+      console.warn(`[process] blocked unsupported mimeType: ${mimeType}`);
+      return NextResponse.json({ error: mimeValidation.message }, { status: 400 });
     }
 
     // 使用内置的 Node.js 处理

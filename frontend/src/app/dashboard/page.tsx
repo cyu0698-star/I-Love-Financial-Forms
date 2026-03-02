@@ -11,6 +11,7 @@ import ResultView from "@/features/dashboard/components/ResultView";
 import DownloadModal from "@/features/dashboard/components/DownloadModal";
 import TemplateCreatorModal from "@/features/dashboard/components/TemplateCreatorModal";
 import EditableForm from "@/features/dashboard/components/EditableForm";
+import { buildNonJsonApiError, parseJsonSafely } from "@/lib/http";
 import { 
   UploadedFile, 
   TemplateType, 
@@ -37,6 +38,17 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [templateRefreshKey, setTemplateRefreshKey] = useState(0);
   const [filledFormData, setFilledFormData] = useState<FilledFormData | null>(null);
+  const [allowSemanticFallback, setAllowSemanticFallback] = useState(true);
+  const [extractDiagnostics, setExtractDiagnostics] = useState<{
+    extractionMode?: string;
+    transformQuality?: {
+      inlierRatio?: number;
+      reprojectionErrorPx?: number;
+      matchCount?: number;
+      inlierCount?: number;
+      failures?: string[];
+    };
+  } | null>(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -48,8 +60,9 @@ export default function DashboardPage() {
   }, [router]);
 
   const handleFilesAdded = useCallback((newFiles: UploadedFile[]) => {
-    setFiles((prev) => [...prev, ...newFiles]);
+    setFiles(newFiles.slice(0, 1));
     setError(null);
+    setExtractDiagnostics(null);
   }, []);
 
   const handleFileRemove = useCallback((id: string) => {
@@ -72,11 +85,13 @@ export default function DashboardPage() {
     setSelectedCustomTemplate(template);
     setSelectedType(null);
     setError(null);
+    setExtractDiagnostics(null);
   }, []);
 
   const handleSelectType = useCallback((type: TemplateType) => {
     setSelectedType(type);
     setSelectedCustomTemplate(null);
+    setExtractDiagnostics(null);
   }, []);
 
   const handleGenerate = async () => {
@@ -84,6 +99,7 @@ export default function DashboardPage() {
 
     setIsProcessing(true);
     setError(null);
+    setExtractDiagnostics(null);
 
     try {
       const file = files[0].file;
@@ -103,19 +119,54 @@ export default function DashboardPage() {
               tableHeaders: selectedCustomTemplate.structure.tableHeaders,
               summaryFields: selectedCustomTemplate.structure.summaryFields,
             },
+            templateLayout: selectedCustomTemplate.templateLayout || null,
+            allowSemanticFallback,
+            ocrTokens: [],
           }),
         });
 
-        const data = await response.json();
+        const { data, text, isJson } = await parseJsonSafely(response);
+
+        if (!isJson) {
+          throw new Error(buildNonJsonApiError(response, text));
+        }
+        const payload = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+        const transformQuality =
+          payload.transformQuality && typeof payload.transformQuality === "object"
+            ? (payload.transformQuality as {
+                inlierRatio?: number;
+                reprojectionErrorPx?: number;
+                matchCount?: number;
+                inlierCount?: number;
+                failures?: string[];
+              })
+            : undefined;
 
         if (!response.ok) {
-          throw new Error(data.error || "数据提取失败");
+          if (response.status === 422 && transformQuality) {
+            const failures = Array.isArray(transformQuality.failures)
+              ? transformQuality.failures.join(", ")
+              : "unknown";
+            const matchCount = Number(transformQuality.matchCount || 0);
+            const inlierRatio = Number(transformQuality.inlierRatio || 0);
+            const reproj = Number(transformQuality.reprojectionErrorPx || 0);
+            throw new Error(
+              `对齐失败：匹配锚点 ${matchCount}，内点率 ${(inlierRatio * 100).toFixed(1)}%，重投影误差 ${reproj.toFixed(2)}px。原因: ${failures}`
+            );
+          }
+          throw new Error((payload.error as string) || "数据提取失败");
         }
 
+        setExtractDiagnostics({
+          extractionMode:
+            typeof payload.extractionMode === "string" ? payload.extractionMode : undefined,
+          transformQuality,
+        });
+
         setFilledFormData({
-          companyInfo: data.companyInfo || {},
-          tableRows: data.tableRows || [],
-          summary: data.summary || {},
+          companyInfo: (payload.companyInfo as Record<string, string>) || {},
+          tableRows: (payload.tableRows as Record<string, string>[]) || [],
+          summary: (payload.summary as Record<string, string>) || {},
         });
         setStep("editForm");
       } else if (selectedType) {
@@ -131,13 +182,18 @@ export default function DashboardPage() {
           }),
         });
 
-        const data = await response.json();
+        const { data, text, isJson } = await parseJsonSafely(response);
+
+        if (!isJson) {
+          throw new Error(buildNonJsonApiError(response, text));
+        }
+        const payload = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
 
         if (!response.ok) {
-          throw new Error(data.error || "处理失败");
+          throw new Error((payload.error as string) || "处理失败");
         }
 
-        setResult(data);
+        setResult(payload as unknown as ProcessResult);
         setStep("result");
       }
     } catch (err) {
@@ -152,6 +208,7 @@ export default function DashboardPage() {
     setStep("upload");
     setResult(null);
     setFilledFormData(null);
+    setExtractDiagnostics(null);
   };
 
   const handleFormDataChange = useCallback((data: FilledFormData) => {
@@ -207,6 +264,19 @@ export default function DashboardPage() {
               {error}
             </div>
           )}
+          {extractDiagnostics?.extractionMode === "semantic_fallback" && (
+            <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+              当前提取模式: 语义降级。原因: 模板对齐质量不足，本次未使用坐标对齐，仅按语义字段提取。
+            </div>
+          )}
+          {extractDiagnostics?.transformQuality && (
+            <div className="mb-4 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600">
+              对齐诊断: 锚点 {extractDiagnostics.transformQuality.inlierCount || 0}/
+              {extractDiagnostics.transformQuality.matchCount || 0}，内点率{" "}
+              {((extractDiagnostics.transformQuality.inlierRatio || 0) * 100).toFixed(1)}%，
+              重投影误差 {(extractDiagnostics.transformQuality.reprojectionErrorPx || 0).toFixed(2)}px
+            </div>
+          )}
 
           {step === "editForm" && selectedCustomTemplate && filledFormData ? (
             <EditableForm
@@ -235,6 +305,24 @@ export default function DashboardPage() {
                 onCreateTemplate={handleCreateTemplate}
                 refreshKey={templateRefreshKey}
               />
+            </div>
+          )}
+          {step === "upload" && selectedCustomTemplate && (
+            <div className="mt-4 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-600 flex items-center justify-between">
+              <div>
+                <p className="font-medium text-slate-700">对齐失败时语义降级</p>
+                <p className="text-xs text-slate-500">
+                  开启后，若坐标对齐失败仍继续提取数据，但不保证版式坐标准确。
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allowSemanticFallback}
+                  onChange={(e) => setAllowSemanticFallback(e.target.checked)}
+                />
+                <span className="text-xs text-slate-700">允许降级</span>
+              </label>
             </div>
           )}
         </div>

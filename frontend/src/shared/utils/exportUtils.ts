@@ -1,12 +1,12 @@
 import * as XLSX from 'xlsx';
 import { CustomTemplate, FilledFormData, ProcessResult } from "@/features/documents/types";
+import {
+  buildLayoutWritePlan,
+  buildLayoutPreviewGrid,
+  shouldUseLayoutExport,
+} from "@/shared/utils/layoutExport.mjs";
 
 export type ExportFormat = 'excel' | 'csv' | 'json';
-
-interface ExportOptions {
-  filename: string;
-  format: ExportFormat;
-}
 
 // Export filled form data to Excel
 export function exportFilledFormToExcel(
@@ -15,6 +15,40 @@ export function exportFilledFormToExcel(
   filename?: string
 ): void {
   const wb = XLSX.utils.book_new();
+
+  // Phase 4 skeleton: when template layout is available, include a write-plan sheet
+  // that can later be upgraded to true coordinate/cell fill.
+  if (shouldUseLayoutExport(template)) {
+    const layoutPlan = buildLayoutWritePlan(template.templateLayout, formData);
+    const preview = buildLayoutPreviewGrid(layoutPlan);
+    const wsPreview = XLSX.utils.aoa_to_sheet(preview.matrix);
+    wsPreview["!cols"] = preview.colWidths;
+    wsPreview["!rows"] = preview.rowHeights;
+    XLSX.utils.book_append_sheet(wb, wsPreview, "版式回填预览");
+
+    const wsLayout = XLSX.utils.json_to_sheet(
+      layoutPlan.map((item: {
+        key: string;
+        label: string;
+        value: string;
+        x: number | null;
+        y: number | null;
+        w: number | null;
+        h: number | null;
+        confidence: number;
+      }) => ({
+        字段Key: item.key,
+        字段名: item.label,
+        值: item.value,
+        X: item.x,
+        Y: item.y,
+        W: item.w,
+        H: item.h,
+        置信度: item.confidence,
+      }))
+    );
+    XLSX.utils.book_append_sheet(wb, wsLayout, '布局回填计划');
+  }
   
   // Sheet 1: Company Info
   if (template.structure.companyInfo.fields.length > 0) {
@@ -75,7 +109,7 @@ export function exportProcessResultToExcel(
   // Sheet 1: Summary info
   if (result.summary) {
     const summaryData = Object.entries(result.summary)
-      .filter(([_, value]) => value)
+      .filter(([, value]) => value)
       .map(([key, value]) => ({
         '字段': translateSummaryKey(key),
         '值': value

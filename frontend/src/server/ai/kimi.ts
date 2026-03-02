@@ -1,11 +1,25 @@
-import { TemplateType, TemplateRecognitionResult, DataExtractionResult } from "@/features/documents/types";
+import {
+  TemplateType,
+  TemplateRecognitionResult,
+  DataExtractionResult,
+} from "@/features/documents/types";
+import {
+  isSupportedVisionImageMimeType,
+  isPdfMimeType,
+} from "@/server/layout/fileTypes.mjs";
+import { buildLowConfidenceFields } from "@/server/layout/confidence.mjs";
+import {
+  mapCompanyInfo,
+  mapSummary,
+  mapTableRows,
+} from "@/server/layout/extractionMap.mjs";
 
-// Kimi API 配置
-const KIMI_API_KEY = process.env.KIMI_API_KEY || 'sk-KPPIIetCLtcDyDaaDEz5vAEeAc7vjQYnjHlKm6n4nt45KXPI';
-const KIMI_API_ENDPOINT = 'https://api.moonshot.cn/v1/chat/completions';
-const KIMI_FILES_ENDPOINT = 'https://api.moonshot.cn/v1/files';
-const KIMI_VISION_MODEL = 'moonshot-v1-8k-vision-preview';
-const KIMI_TEXT_MODEL = 'moonshot-v1-32k'; // 用于处理 PDF 文件
+const KIMI_API_KEY =
+  process.env.KIMI_API_KEY || "sk-KPPIIetCLtcDyDaaDEz5vAEeAc7vjQYnjHlKm6n4nt45KXPI";
+const KIMI_API_ENDPOINT = "https://api.moonshot.cn/v1/chat/completions";
+const KIMI_FILES_ENDPOINT = "https://api.moonshot.cn/v1/files";
+const KIMI_VISION_MODEL = "moonshot-v1-8k-vision-preview";
+const KIMI_TEXT_MODEL = "moonshot-v1-32k";
 
 const TEMPLATE_PROMPTS: Record<TemplateType, string> = {
   delivery_note: `你是一个专业的财务文件识别助手。请从上传的文件中提取送货单信息，并以 JSON 格式返回。
@@ -13,109 +27,135 @@ const TEMPLATE_PROMPTS: Record<TemplateType, string> = {
 - headers: 表头数组，例如 ["日期", "品名", "规格", "数量", "单价", "金额", "备注"]
 - rows: 数据行数组，每行是一个对象
 - summary: 摘要信息，包含 totalAmount(总金额), documentDate(单据日期), supplier(供应商/客户), documentType(单据类型), documentNumber(单据编号)
-
-注意：请忽略文档中的盖章、印章、签名等信息，不需要提取这些内容。
-只返回 JSON，不要返回其他内容。如果某个字段无法识别，请填写空字符串。`,
-
+注意：请忽略盖章、印章、签名等信息。只返回 JSON。`,
   reconciliation: `你是一个专业的财务文件识别助手。请从上传的文件中提取对账单信息，并以 JSON 格式返回。
 请提取以下字段：
 - headers: 表头数组，例如 ["日期", "摘要", "借方金额", "贷方金额", "余额", "备注"]
 - rows: 数据行数组，每行是一个对象
-- summary: 摘要信息，包含 totalAmount(总金额), documentDate(单据日期), supplier(对方单位), documentType(单据类型), documentNumber(单据编号)
-
-注意：请忽略文档中的盖章、印章、签名等信息，不需要提取这些内容。
-只返回 JSON，不要返回其他内容。如果某个字段无法识别，请填写空字符串。`,
-
+- summary: 摘要信息，包含 totalAmount, documentDate, supplier, documentType, documentNumber
+注意：请忽略盖章、印章、签名等信息。只返回 JSON。`,
   purchase_order: `你是一个专业的财务文件识别助手。请从上传的文件中提取采购单信息，并以 JSON 格式返回。
 请提取以下字段：
 - headers: 表头数组，例如 ["序号", "品名", "规格型号", "单位", "数量", "单价", "金额"]
 - rows: 数据行数组，每行是一个对象
-- summary: 摘要信息，包含 totalAmount(合计金额), documentDate(采购日期), supplier(供应商), documentType(单据类型), documentNumber(采购单号)
-
-注意：请忽略文档中的盖章、印章、签名等信息，不需要提取这些内容。
-只返回 JSON，不要返回其他内容。如果某个字段无法识别，请填写空字符串。`,
-
+- summary: 摘要信息，包含 totalAmount, documentDate, supplier, documentType, documentNumber
+注意：请忽略盖章、印章、签名等信息。只返回 JSON。`,
   bank_statement: `你是一个专业的财务文件识别助手。请从上传的文件中提取银行流水/对账信息，并以 JSON 格式返回。
 请提取以下字段：
 - headers: 表头数组，例如 ["交易日期", "交易类型", "对方账户", "摘要", "收入", "支出", "余额"]
 - rows: 数据行数组，每行是一个对象
-- summary: 摘要信息，包含 totalAmount(期末余额), documentDate(账单日期), supplier(开户行), documentType(单据类型), documentNumber(账号)
-
-注意：请忽略文档中的盖章、印章、签名等信息，不需要提取这些内容。
-只返回 JSON，不要返回其他内容。如果某个字段无法识别，请填写空字符串。`,
-
+- summary: 摘要信息，包含 totalAmount, documentDate, supplier, documentType, documentNumber
+注意：请忽略盖章、印章、签名等信息。只返回 JSON。`,
   payment_list: `你是一个专业的财务文件识别助手。请从上传的文件中提取支付清单信息，并以 JSON 格式返回。
 请提取以下字段：
 - headers: 表头数组，例如 ["序号", "收款方", "账号", "金额", "用途", "日期", "状态"]
 - rows: 数据行数组，每行是一个对象
-- summary: 摘要信息，包含 totalAmount(总支付金额), documentDate(支付日期), supplier(付款方), documentType(单据类型), documentNumber(批次号)
-
-注意：请忽略文档中的盖章、印章、签名等信息，不需要提取这些内容。
-只返回 JSON，不要返回其他内容。如果某个字段无法识别，请填写空字符串。`,
-
+- summary: 摘要信息，包含 totalAmount, documentDate, supplier, documentType, documentNumber
+注意：请忽略盖章、印章、签名等信息。只返回 JSON。`,
   quotation: `你是一个专业的财务文件识别助手。请从上传的文件中提取报价单信息，并以 JSON 格式返回。
 请提取以下字段：
 - headers: 表头数组，例如 ["序号", "规格", "公斤", "数量/公斤", "单价", "金额", "备注"]
 - rows: 数据行数组，每行是一个对象
-- summary: 摘要信息，包含 totalAmount(合计金额), documentDate(报价日期), supplier(供应商/公司名称), documentType(单据类型), documentNumber(报价单号), contact(联系电话), address(地址)
-
-注意：请忽略文档中的盖章、印章、签名、水印等信息，不需要提取这些内容。
-只返回 JSON，不要返回其他内容。如果某个字段无法识别，请填写空字符串。`,
+- summary: 摘要信息，包含 totalAmount, documentDate, supplier, documentType, documentNumber, contact, address
+注意：请忽略盖章、印章、签名、水印等信息。只返回 JSON。`,
 };
 
-// 上传文件到 Kimi（用于 PDF 等文档）
-async function uploadFileToKimi(fileBase64: string, filename: string): Promise<string> {
-  // 将 base64 转换为 Blob
-  const binaryString = atob(fileBase64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+function extractMessageText(payload: unknown): string {
+  const root = payload as Record<string, unknown>;
+  const choices = root.choices as Array<Record<string, unknown>> | undefined;
+  const first = Array.isArray(choices) ? choices[0] : undefined;
+  const message = (first?.message || {}) as Record<string, unknown>;
+  const content = message.content;
+
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && "text" in part) {
+          const text = (part as { text?: unknown }).text;
+          return typeof text === "string" ? text : "";
+        }
+        return "";
+      })
+      .join("\n")
+      .trim();
   }
-  const blob = new Blob([bytes], { type: 'application/pdf' });
+  return "";
+}
 
-  // 创建 FormData
-  const formData = new FormData();
-  formData.append('file', blob, filename);
-  formData.append('purpose', 'file-extract');
+function parseJsonFromText(
+  text: string,
+  noJsonError: string,
+  parseError: string
+): Record<string, unknown> {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error(noJsonError);
+  }
+  try {
+    return JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+  } catch {
+    throw new Error(parseError);
+  }
+}
 
-  console.log(`[Kimi] 上传文件: ${filename}`);
-
-  const response = await fetch(KIMI_FILES_ENDPOINT, {
-    method: 'POST',
+async function callKimi(requestBody: Record<string, unknown>): Promise<string> {
+  const response = await fetch(KIMI_API_ENDPOINT, {
+    method: "POST",
     headers: {
-      'Authorization': `Bearer ${KIMI_API_KEY}`,
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${KIMI_API_KEY}`,
     },
-    body: formData,
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[Kimi] 文件上传失败:', response.status, errorText);
-    throw new Error(`文件上传失败: ${response.status} - ${errorText}`);
+    throw new Error(`Kimi API 请求失败: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
-  console.log(`[Kimi] 文件上传成功, file_id: ${data.id}`);
+  const text = extractMessageText(data);
+  if (!text) throw new Error("Kimi 未返回有效响应");
+  return text;
+}
+
+async function uploadFileToKimi(fileBase64: string, filename: string): Promise<string> {
+  const binaryString = atob(fileBase64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i += 1) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const formData = new FormData();
+  formData.append("file", blob, filename);
+  formData.append("purpose", "file-extract");
+
+  const response = await fetch(KIMI_FILES_ENDPOINT, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${KIMI_API_KEY}` },
+    body: formData,
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`文件上传失败: ${response.status} - ${errorText}`);
+  }
+  const data = (await response.json()) as { id?: string };
+  if (!data.id) throw new Error("文件上传成功但未返回 file_id");
   return data.id;
 }
 
-// 获取文件内容
 async function getFileContent(fileId: string): Promise<string> {
   const response = await fetch(`${KIMI_FILES_ENDPOINT}/${fileId}/content`, {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${KIMI_API_KEY}`,
-    },
+    method: "GET",
+    headers: { Authorization: `Bearer ${KIMI_API_KEY}` },
   });
-
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('[Kimi] 获取文件内容失败:', response.status, errorText);
     throw new Error(`获取文件内容失败: ${response.status} - ${errorText}`);
   }
-
-  const content = await response.text();
-  return content;
+  return response.text();
 }
 
 export async function processDocument(
@@ -124,219 +164,185 @@ export async function processDocument(
   templateType: TemplateType
 ) {
   const prompt = TEMPLATE_PROMPTS[templateType];
-  const isPdf = mimeType === 'application/pdf';
+  const isPdf = isPdfMimeType(mimeType);
 
-  let requestBody;
-
+  let requestBody: Record<string, unknown>;
   if (isPdf) {
-    // PDF 文件：使用文件上传 API
-    console.log(`[Kimi] 检测到 PDF 文件，使用文件上传方式处理`);
-    
     const fileId = await uploadFileToKimi(fileBase64, `document_${Date.now()}.pdf`);
     const fileContent = await getFileContent(fileId);
-    
-    console.log(`[Kimi] 文件内容长度: ${fileContent.length} 字符`);
-
     requestBody = {
       model: KIMI_TEXT_MODEL,
       messages: [
-        {
-          role: "system",
-          content: fileContent,
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
+        { role: "system", content: fileContent },
+        { role: "user", content: prompt },
       ],
       max_tokens: 4096,
     };
-
-    console.log(`[Kimi] 使用模型: ${KIMI_TEXT_MODEL} (文本模型)`);
   } else {
-    // 图片文件：使用 vision API
-    console.log(`[Kimi] 检测到图片文件，使用 vision API 处理`);
-    
-    const imageUrl = `data:${mimeType};base64,${fileBase64}`;
-    
+    if (!isSupportedVisionImageMimeType(mimeType)) {
+      throw new Error(`不支持的文件类型: ${mimeType || "unknown"}。Kimi 视觉模型仅支持图片。`);
+    }
     requestBody = {
       model: KIMI_VISION_MODEL,
       messages: [
         {
           role: "user",
           content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: imageUrl,
-              },
-            },
-            {
-              type: "text",
-              text: prompt,
-            },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+            { type: "text", text: prompt },
           ],
         },
       ],
       max_tokens: 4096,
     };
-
-    console.log(`[Kimi] 使用模型: ${KIMI_VISION_MODEL} (视觉模型)`);
   }
 
-  console.log(`[Kimi] API 端点: ${KIMI_API_ENDPOINT}`);
-
-  const response = await fetch(KIMI_API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${KIMI_API_KEY}`,
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[Kimi] API 响应错误:", response.status, errorText);
-    throw new Error(`Kimi API 请求失败: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  
-  // 提取回复内容 (OpenAI 兼容格式)
-  const text = data.choices?.[0]?.message?.content || "";
-  
-  if (!text) {
-    throw new Error("Kimi 未返回有效响应");
-  }
-
-  console.log("[Kimi] 原始响应:", text.substring(0, 500));
-
-  // Extract JSON from response
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("Kimi 未能返回有效的结构化数据");
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      headers: parsed.headers || [],
-      rows: parsed.rows || [],
-      summary: parsed.summary || {},
-      rawText: text,
-    };
-  } catch {
-    throw new Error("Kimi 返回的数据格式无法解析");
-  }
+  const text = await callKimi(requestBody);
+  const parsed = parseJsonFromText(
+    text,
+    "Kimi 未能返回有效的结构化数据",
+    "Kimi 返回的数据格式无法解析"
+  );
+  return {
+    headers: (parsed.headers as string[]) || [],
+    rows: (parsed.rows as Record<string, string>[]) || [],
+    summary: (parsed.summary as Record<string, string>) || {},
+    rawText: text,
+  };
 }
 
-// 识别模板结构 - 从模板截图中识别表单结构
 export async function recognizeTemplateStructure(
   fileBase64: string,
   mimeType: string
 ): Promise<TemplateRecognitionResult> {
+  if (!isSupportedVisionImageMimeType(mimeType)) {
+    throw new Error(`模板识别仅支持图片文件（JPG/PNG/WEBP），当前类型: ${mimeType || "unknown"}`);
+  }
+
   const prompt = `你是一个专业的表单结构分析助手。请分析上传的单据/表单图片，识别其结构并以 JSON 格式返回。
+请识别：
+1) companyInfo.fields: key/label/type(required)
+2) tableHeaders
+3) tableFieldTypes (text/number/date)
+4) summaryFields
+只返回 JSON。`;
 
-请识别以下内容：
-1. companyInfo: 公司/抬头信息区域的字段，返回一个对象包含 fields 数组
-   - 每个 field 包含: key(字段标识), label(显示名称), type(text/number/date), required(是否必填)
-   - 常见字段如：公司名称、电话、传真、地址、日期等
-
-2. tableHeaders: 表格区域的列表头数组，例如 ["序号", "规格", "数量", "单价", "金额", "备注"]
-
-3. tableFieldTypes: 每列对应的数据类型数组，例如 ["number", "text", "number", "number", "number", "text"]
-   - 类型只能是: text, number, date
-
-4. summaryFields: 汇总/底部区域的字段名称数组，例如 ["合计", "备注说明", "制表人"]
-
-请严格按以下 JSON 格式返回，不要返回其他内容：
-{
-  "companyInfo": {
-    "fields": [
-      {"key": "companyName", "label": "公司名称", "type": "text", "required": true},
-      {"key": "phone", "label": "电话", "type": "text", "required": false}
-    ]
-  },
-  "tableHeaders": ["序号", "品名", "规格", "数量", "单价", "金额"],
-  "tableFieldTypes": ["number", "text", "text", "number", "number", "number"],
-  "summaryFields": ["合计", "备注"]
-}
-
-注意：
-- 请忽略文档中的盖章、印章、签名、水印等信息
-- 如果某个区域没有内容，返回空数组
-- 表头和类型数组长度必须一致`;
-
-  const imageUrl = `data:${mimeType};base64,${fileBase64}`;
-  
-  const requestBody = {
+  const text = await callKimi({
     model: KIMI_VISION_MODEL,
     messages: [
       {
         role: "user",
         content: [
-          {
-            type: "image_url",
-            image_url: {
-              url: imageUrl,
-            },
-          },
-          {
-            type: "text",
-            text: prompt,
-          },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+          { type: "text", text: prompt },
         ],
       },
     ],
     max_tokens: 4096,
-  };
-
-  console.log(`[Kimi] 识别模板结构，使用模型: ${KIMI_VISION_MODEL}`);
-
-  const response = await fetch(KIMI_API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${KIMI_API_KEY}`,
-    },
-    body: JSON.stringify(requestBody),
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[Kimi] API 响应错误:", response.status, errorText);
-    throw new Error(`Kimi API 请求失败: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  
-  if (!text) {
-    throw new Error("Kimi 未返回有效响应");
-  }
-
-  console.log("[Kimi] 模板识别响应:", text.substring(0, 500));
-
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("Kimi 未能返回有效的结构化数据");
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      companyInfo: parsed.companyInfo || { fields: [] },
-      tableHeaders: parsed.tableHeaders || [],
-      tableFieldTypes: parsed.tableFieldTypes || [],
-      summaryFields: parsed.summaryFields || [],
-    };
-  } catch {
-    throw new Error("Kimi 返回的模板结构数据无法解析");
-  }
+  const parsed = parseJsonFromText(
+    text,
+    "Kimi 未能返回有效的结构化数据",
+    "Kimi 返回的模板结构数据无法解析"
+  );
+  return {
+    companyInfo: (parsed.companyInfo as TemplateRecognitionResult["companyInfo"]) || { fields: [] },
+    tableHeaders: (parsed.tableHeaders as string[]) || [],
+    tableFieldTypes: (parsed.tableFieldTypes as string[]) || [],
+    summaryFields: (parsed.summaryFields as string[]) || [],
+  };
 }
 
-// 提取数据填充模板 - 从原始单据提取数据并映射到模板结构
+export async function classifyTemplateTokensByVision(
+  fileBase64: string,
+  mimeType: string,
+  tokens: Array<{
+    id: string;
+    text: string;
+    bbox: { x: number; y: number; w: number; h: number };
+  }>
+): Promise<{
+  fixedTokenIds: string[];
+  variableTokenIds: string[];
+  tableHeaderTokenIds: string[];
+}> {
+  if (!isSupportedVisionImageMimeType(mimeType)) {
+    return { fixedTokenIds: [], variableTokenIds: [], tableHeaderTokenIds: [] };
+  }
+
+  const compactTokens = tokens
+    .filter(
+      (t) =>
+        t &&
+        typeof t.id === "string" &&
+        typeof t.text === "string" &&
+        t.text.trim().length > 0 &&
+        t.bbox &&
+        typeof t.bbox.x === "number" &&
+        typeof t.bbox.y === "number" &&
+        typeof t.bbox.w === "number" &&
+        typeof t.bbox.h === "number"
+    )
+    .slice(0, 360)
+    .map((t) => ({
+      id: t.id,
+      text: t.text.trim(),
+      bbox: {
+        x: Number(t.bbox.x.toFixed(1)),
+        y: Number(t.bbox.y.toFixed(1)),
+        w: Number(t.bbox.w.toFixed(1)),
+        h: Number(t.bbox.h.toFixed(1)),
+      },
+    }));
+
+  if (compactTokens.length === 0) {
+    return { fixedTokenIds: [], variableTokenIds: [], tableHeaderTokenIds: [] };
+  }
+
+  const prompt = `你是模板版式语义分析器。你会收到一张票据图片和 OCR tokens（含 id/text/bbox 像素坐标）。
+任务：判断每个 token 是否属于“模板固定文本”还是“每次变化的数据”。
+规则：
+1) fixedTokenIds：固定文本（logo名、标签名、固定说明、固定表头、固定脚注等）。
+2) variableTokenIds：会变化的数据（单号、日期、客户名、客户地址、电话、数量、单价、金额、商品明细值、订单号等）。
+   注意："产品名称"如果是表头列名，归入 tableHeaderTokenIds；如果是"产品名称: xxx"或具体商品名文本，归入 variableTokenIds。
+3) tableHeaderTokenIds：表格表头（通常也是固定文本）。
+4) 只能使用输入里出现过的 token id，不要编造 id。
+5) 输出必须是 JSON，格式：
+{"fixedTokenIds":["..."],"variableTokenIds":["..."],"tableHeaderTokenIds":["..."]}`;
+
+  const text = await callKimi({
+    model: KIMI_VISION_MODEL,
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+          { type: "text", text: `${prompt}\n\nOCR tokens:\n${JSON.stringify(compactTokens)}` },
+        ],
+      },
+    ],
+    max_tokens: 4096,
+  });
+
+  const parsed = parseJsonFromText(
+    text,
+    "Kimi 未返回 token 语义分类 JSON",
+    "Kimi token 语义分类 JSON 解析失败"
+  );
+
+  const asIdArray = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter((v) => typeof v === "string" && v.trim().length > 0)
+      : [];
+
+  return {
+    fixedTokenIds: asIdArray(parsed.fixedTokenIds),
+    variableTokenIds: asIdArray(parsed.variableTokenIds),
+    tableHeaderTokenIds: asIdArray(parsed.tableHeaderTokenIds),
+  };
+}
+
 export async function extractDataToTemplate(
   fileBase64: string,
   mimeType: string,
@@ -344,87 +350,57 @@ export async function extractDataToTemplate(
     companyInfo: { fields: Array<{ key: string; label: string }> };
     tableHeaders: string[];
     summaryFields: string[];
+  },
+  options?: {
+    templateLayout?: {
+      fields?: Array<{ key: string; label: string; confidence?: number }>;
+    } | null;
+    ocrTokens?: Array<{
+      text: string;
+      bbox?: { x: number; y: number; w: number; h: number };
+    }> | null;
   }
 ): Promise<DataExtractionResult> {
-  const companyFieldLabels = templateStructure.companyInfo.fields.map(f => f.label).join('、');
-  const tableHeadersStr = templateStructure.tableHeaders.join('、');
-  const summaryFieldsStr = templateStructure.summaryFields.join('、');
+  const companyFieldLabels = templateStructure.companyInfo.fields.map((f) => f.label).join("、");
+  const companyFieldKeys = templateStructure.companyInfo.fields.map((f) => f.key).join("、");
+  const tableHeadersStr = templateStructure.tableHeaders.join("、");
+  const summaryFieldsStr = templateStructure.summaryFields.join("、");
+  const prompt = `请从单据中提取数据并按模板返回 JSON。
+公司字段: ${companyFieldLabels || "无"}
+公司字段key: ${companyFieldKeys || "无"}
+表格列: ${tableHeadersStr || "无"}
+汇总字段: ${summaryFieldsStr || "无"}
+要求：
+1) companyInfo 的键必须使用上述 company 字段 key。
+2) tableRows 每一行对象的键必须使用上述“表格列”原文。
+3) summary 的键必须使用上述“汇总字段”原文。
+4) 缺失字段填空字符串。
+只返回 JSON。`;
 
-  const prompt = `你是一个专业的单据数据提取助手。请从上传的单据图片中提取数据，并按照指定的模板结构返回 JSON。
-
-目标模板结构：
-1. 公司信息区字段: ${companyFieldLabels || '无'}
-2. 表格列: ${tableHeadersStr || '无'}
-3. 汇总区字段: ${summaryFieldsStr || '无'}
-
-请按以下 JSON 格式返回提取的数据：
-{
-  "companyInfo": {
-    "字段key1": "提取的值1",
-    "字段key2": "提取的值2"
-  },
-  "tableRows": [
-    {"列名1": "值", "列名2": "值", ...},
-    {"列名1": "值", "列名2": "值", ...}
-  ],
-  "summary": {
-    "汇总字段1": "值",
-    "汇总字段2": "值"
-  }
-}
-
-具体字段映射：
-- companyInfo 的 key 使用: ${templateStructure.companyInfo.fields.map(f => `"${f.key}"`).join(', ') || '无'}
-- tableRows 每行的 key 使用: ${templateStructure.tableHeaders.map(h => `"${h}"`).join(', ') || '无'}
-- summary 的 key 使用: ${templateStructure.summaryFields.map(f => `"${f}"`).join(', ') || '无'}
-
-注意：
-- 如果某个字段在原始单据中找不到对应数据，请填写空字符串
-- 请尽量智能匹配，即使原始单据的字段名称与模板不完全一致
-- 数字类型的值请保持数字格式，不要加单位
-- 忽略盖章、签名等非数据内容
-- 只返回 JSON，不要返回其他内容`;
-
-  const isPdf = mimeType === 'application/pdf';
-  let requestBody;
-
-  if (isPdf) {
+  let requestBody: Record<string, unknown>;
+  if (isPdfMimeType(mimeType)) {
     const fileId = await uploadFileToKimi(fileBase64, `source_${Date.now()}.pdf`);
     const fileContent = await getFileContent(fileId);
-
     requestBody = {
       model: KIMI_TEXT_MODEL,
       messages: [
-        {
-          role: "system",
-          content: fileContent,
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
+        { role: "system", content: fileContent },
+        { role: "user", content: prompt },
       ],
       max_tokens: 8192,
     };
   } else {
-    const imageUrl = `data:${mimeType};base64,${fileBase64}`;
-    
+    if (!isSupportedVisionImageMimeType(mimeType)) {
+      throw new Error(`不支持的文件类型: ${mimeType || "unknown"}。模板提取目前仅支持 PDF 或图片。`);
+    }
     requestBody = {
       model: KIMI_VISION_MODEL,
       messages: [
         {
           role: "user",
           content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: imageUrl,
-              },
-            },
-            {
-              type: "text",
-              text: prompt,
-            },
+            { type: "image_url", image_url: { url: `data:${mimeType};base64,${fileBase64}` } },
+            { type: "text", text: prompt },
           ],
         },
       ],
@@ -432,45 +408,43 @@ export async function extractDataToTemplate(
     };
   }
 
-  console.log(`[Kimi] 提取数据到模板，使用模型: ${isPdf ? KIMI_TEXT_MODEL : KIMI_VISION_MODEL}`);
+  const text = await callKimi(requestBody);
+  const parsed = parseJsonFromText(
+    text,
+    "Kimi 未能返回有效的结构化数据",
+    "Kimi 返回的数据无法解析"
+  );
+  const rawCompanyInfo = (parsed.companyInfo as Record<string, unknown>) || {};
+  const rawTableRows =
+    (parsed.tableRows as Array<Record<string, unknown> | unknown[]>) ||
+    (parsed.rows as Array<Record<string, unknown> | unknown[]>) ||
+    [];
+  const rawSummary = (parsed.summary as Record<string, unknown>) || {};
+  const companyInfo = mapCompanyInfo(
+    rawCompanyInfo,
+    templateStructure.companyInfo.fields
+  ) as Record<string, string>;
+  const tableRows = mapTableRows(
+    rawTableRows,
+    templateStructure.tableHeaders
+  ) as Record<string, string>[];
+  const summary = mapSummary(
+    rawSummary,
+    templateStructure.summaryFields
+  ) as Record<string, string>;
+  const lowConfidenceFields =
+    options?.templateLayout?.fields && options.templateLayout.fields.length > 0
+      ? buildLowConfidenceFields({
+          templateLayout: options.templateLayout,
+          companyInfo,
+          ocrTokens: options?.ocrTokens || [],
+        })
+      : [];
 
-  const response = await fetch(KIMI_API_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${KIMI_API_KEY}`,
-    },
-    body: JSON.stringify(requestBody),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("[Kimi] API 响应错误:", response.status, errorText);
-    throw new Error(`Kimi API 请求失败: ${response.status} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  const text = data.choices?.[0]?.message?.content || "";
-  
-  if (!text) {
-    throw new Error("Kimi 未返回有效响应");
-  }
-
-  console.log("[Kimi] 数据提取响应:", text.substring(0, 500));
-
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error("Kimi 未能返回有效的结构化数据");
-  }
-
-  try {
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      companyInfo: parsed.companyInfo || {},
-      tableRows: parsed.tableRows || [],
-      summary: parsed.summary || {},
-    };
-  } catch {
-    throw new Error("Kimi 返回的数据无法解析");
-  }
+  return {
+    companyInfo,
+    tableRows,
+    summary,
+    lowConfidenceFields,
+  };
 }

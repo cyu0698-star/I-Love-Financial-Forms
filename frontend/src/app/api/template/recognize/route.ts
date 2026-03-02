@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recognizeTemplateStructure } from "@/server/ai/kimi";
+import { isSupportedVisionImageMimeType } from "@/server/layout/fileTypes.mjs";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,16 @@ export async function POST(request: NextRequest) {
     if (!fileBase64 || !mimeType) {
       return NextResponse.json(
         { error: "缺少必要参数：fileBase64, mimeType" },
+        { status: 400 }
+      );
+    }
+
+    if (!isSupportedVisionImageMimeType(mimeType)) {
+      return NextResponse.json(
+        {
+          error:
+            `模板识别当前仅支持图片（JPG/PNG/WEBP）。收到类型：${mimeType || "unknown"}`,
+        },
         { status: 400 }
       );
     }

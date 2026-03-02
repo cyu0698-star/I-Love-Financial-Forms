@@ -62,6 +62,121 @@ export interface TemplateField {
   required: boolean;
 }
 
+export interface LayoutBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface LayoutFont {
+  family: string | null;
+  size: number | null;
+  weight: number | null;
+  estimated: boolean;
+}
+
+export interface TemplateLayoutField {
+  key: string;
+  label: string;
+  semanticType: "text" | "number" | "date";
+  required?: boolean;
+  labelBox: LayoutBox | null;
+  valueBox: LayoutBox | null;
+  font: LayoutFont;
+  confidence: number;
+}
+
+export interface TemplateLayoutColumn {
+  key: string;
+  label: string;
+  semanticType: "text" | "number" | "date";
+  box: LayoutBox | null;
+}
+
+export type LayoutTokenRole =
+  | "fixed_text"
+  | "fillable_value"
+  | "table_header"
+  | "table_cell"
+  | "unknown";
+
+export interface TemplateLayoutToken {
+  id: string;
+  text: string;
+  bbox: LayoutBox;
+  confidence: number;
+  role: LayoutTokenRole;
+}
+
+export interface TemplateLayout {
+  version: number;
+  templateName: string;
+  sourceType: "image" | "electronic_pdf" | "scanned_pdf" | "unknown";
+  tokens: TemplateLayoutToken[];
+  fields: TemplateLayoutField[];
+  table: {
+    columns: TemplateLayoutColumn[];
+    headerBox: LayoutBox | null;
+    dataRegionBox: LayoutBox | null;
+    repeatDirection: "down";
+    rowHeight: number;
+  };
+  summary: Array<{
+    key: string;
+    label: string;
+    valueBox: LayoutBox | null;
+  }>;
+  ocrTokenCount: number;
+  warnings: string[];
+  confidence: number;
+  createdAt: string;
+  meta?: {
+    pipeline: "ocr" | "electronic_pdf" | "unknown";
+    parserVersion: string;
+    pdfNature?: "electronic" | "scanned" | "unknown";
+    ocrProvider?: string;
+    tokenSource?: "client" | "pipeline" | "unknown";
+  };
+}
+
+export interface TemplateModelToken {
+  id: string;
+  text: string;
+  bbox: LayoutBox;
+  kind: "fixed_text" | "table_header";
+}
+
+export interface TemplateModelVariableToken {
+  id: string;
+  text: string;
+  bbox: LayoutBox;
+}
+
+export interface TemplateModel {
+  staticTokens: TemplateModelToken[];
+  variableTokens: TemplateModelVariableToken[];
+  table: null | {
+    headerTokenIds: string[];
+    columns: Array<{
+      key: string;
+      label: string;
+      x: number;
+      tokenId: string;
+      box: LayoutBox;
+    }>;
+    sampleRows: string[][];
+    headerY: number;
+  };
+  stats: {
+    totalTokens: number;
+    staticCount: number;
+    variableCount: number;
+    tableColumns: number;
+  };
+  warnings: string[];
+}
+
 // 自定义模板结构
 export interface CustomTemplate {
   id: string;
@@ -77,6 +192,8 @@ export interface CustomTemplate {
     tableFieldTypes: string[];
     summaryFields: string[];
   };
+  templateLayout?: TemplateLayout;
+  templateModel?: TemplateModel;
 }
 
 // 填充后的表单数据
@@ -101,6 +218,7 @@ export interface DataExtractionResult {
   companyInfo: Record<string, string>;
   tableRows: Record<string, string>[];
   summary: Record<string, string>;
+  lowConfidenceFields?: Array<{ key: string; confidence: number }>;
 }
 
 export const ACCEPTED_FILE_TYPES = [
@@ -108,13 +226,10 @@ export const ACCEPTED_FILE_TYPES = [
   "image/jpeg",
   "image/jpg",
   "image/png",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/webp",
 ];
 
-export const ACCEPTED_EXTENSIONS = ".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx";
+export const ACCEPTED_EXTENSIONS = ".pdf,.jpg,.jpeg,.png,.webp";
 
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 

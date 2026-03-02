@@ -144,6 +144,44 @@
 }
 ```
 
+### 5.3 OCR Provider HTTP 协议（已落地）
+
+当前前端支持 `OCR_PROVIDER=http`，请求 OCR HTTP 服务：
+
+请求（POST `OCR_HTTP_URL`）：
+
+```json
+{
+  "fileBase64": "...",
+  "mimeType": "image/png",
+  "sourceType": "image|scanned_pdf",
+  "mockMode": "empty|basic|dense"
+}
+```
+
+响应（最小协议）：
+
+```json
+{
+  "tokens": [
+    {
+      "text": "开票日期",
+      "bbox": { "x": 120, "y": 160, "w": 140, "h": 32 }
+    }
+  ],
+  "provider": "your-ocr-provider",
+  "warnings": []
+}
+```
+
+容错策略：
+
+1. HTTP provider 非 200、超时或失败时自动降级 `mock`。
+2. `tokens` 为空时不会中断主流程，但会进入低置信度回传路径。
+3. 前端也可直接传 `ocrTokens`，优先级高于 HTTP provider。
+
+当前仓库已提供 backend mock OCR 接口：`POST /api/ocr`。
+
 响应：
 
 ```json

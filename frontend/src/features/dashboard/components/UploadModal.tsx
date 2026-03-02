@@ -14,30 +14,29 @@ export default function UploadModal({ isOpen, onClose, onFilesAdded }: UploadMod
   const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
 
   const processFiles = useCallback((fileList: FileList) => {
-    const newFiles: UploadedFile[] = [];
-    Array.from(fileList).forEach((file) => {
-      if (file.size > MAX_FILE_SIZE) {
-        alert(`文件 "${file.name}" 超过50MB限制`);
-        return;
-      }
-      const uf: UploadedFile = {
-        id: Math.random().toString(36).substr(2, 9),
-        file,
-        name: file.name,
-        size: file.size,
-        type: file.type,
+    const file = fileList[0];
+    if (!file) return;
+    if (file.size > MAX_FILE_SIZE) {
+      alert(`文件 "${file.name}" 超过50MB限制`);
+      return;
+    }
+    const uf: UploadedFile = {
+      id: Math.random().toString(36).substr(2, 9),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+    };
+    if (file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        uf.preview = e.target?.result as string;
+        setPendingFiles([uf]);
       };
-      if (file.type.startsWith("image/")) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          uf.preview = e.target?.result as string;
-          setPendingFiles((prev) => [...prev]);
-        };
-        reader.readAsDataURL(file);
-      }
-      newFiles.push(uf);
-    });
-    setPendingFiles((prev) => [...prev, ...newFiles]);
+      reader.readAsDataURL(file);
+      return;
+    }
+    setPendingFiles([uf]);
   }, []);
 
   const handleDrop = useCallback(
@@ -139,7 +138,6 @@ export default function UploadModal({ isOpen, onClose, onFilesAdded }: UploadMod
                     点击上传
                     <input
                       type="file"
-                      multiple
                       accept={ACCEPTED_EXTENSIONS}
                       onChange={(e) => {
                         if (e.target.files) processFiles(e.target.files);
@@ -150,7 +148,7 @@ export default function UploadModal({ isOpen, onClose, onFilesAdded }: UploadMod
                   {" "}或者拖拽到这里
                 </p>
                 <p className="text-xs text-slate-400">
-                  doc/pdf/jpg/xlsx 格式, 800x800px
+                  支持 PDF/JPG/PNG/WEBP
                 </p>
               </>
             )}

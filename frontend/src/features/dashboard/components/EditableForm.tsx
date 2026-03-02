@@ -39,7 +39,14 @@ export default function EditableForm({
     const dateStr = new Date().toISOString().split('T')[0];
     exportToJSON(
       {
+        exportVersion: 2,
         templateName: template.name,
+        templateId: template.id,
+        templateCreatedAt: template.createdAt,
+        templateCategory: template.category,
+        templateStructure: template.structure,
+        templateLayout: template.templateLayout || null,
+        templateModel: template.templateModel || null,
         companyInfo: formData.companyInfo,
         tableHeaders: template.structure.tableHeaders,
         tableRows: formData.tableRows,
@@ -254,7 +261,7 @@ export default function EditableForm({
                     {formData.tableRows.length === 0 ? (
                       <tr>
                         <td colSpan={template.structure.tableHeaders.length + 2} className="px-4 py-8 text-center text-sm text-slate-400">
-                          暂无数据，点击"添加行"开始录入
+                          暂无数据，点击&quot;添加行&quot;开始录入
                         </td>
                       </tr>
                     ) : (
